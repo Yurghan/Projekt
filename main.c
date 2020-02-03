@@ -20,7 +20,6 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "dma.h"
 #include "eth.h"
 #include "i2c.h"
 #include "tim.h"
@@ -34,6 +33,7 @@
 #include "stdio.h"
 #include "string.h"
 #include "arm_math.h"
+#include "funcaux.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,6 +43,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define BUFFER2_SIZE 40
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,8 +57,9 @@
 
 float BH1750_data, PID_ERROR, zakres_dolny, zakres_gorny;
 int WAR_ZADANA, BH1750_data_int, Duty;
-char buffer[80], buffer2[5];
+char buffer[80], buffer2[BUFFER2_SIZE], zgoda_tx;
 uint8_t rozmiar, size;
+arm_pid_instance_f32 PID;
 
 /* USER CODE END PV */
 
@@ -100,18 +102,26 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
   MX_ETH_Init();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   MX_I2C1_Init();
   MX_USART2_UART_Init();
   MX_TIM3_Init();
+  MX_TIM4_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+  HAL_TIM_Base_Start_IT(&htim4);
+
+  TIM4->ARR=4999;
+  TIM4->PSC=7199;
+
+  TIM2->ARR=999;
+  TIM2->PSC=7199;
+
   BH1750_init(&hi2c1);
 
 
-  arm_pid_instance_f32 PID;
 
   PID.Kp =0;
   PID.Ki =0.025;
@@ -127,34 +137,20 @@ int main(void)
 	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   }
-  TIM3->CCR3=0;
-  TIM3->CCR1=0;
-  TIM3->CCR2=0;
-  HAL_Delay(300);
-  if(BH1750_OK == BH1750_read(&BH1750_data))
-  	{
-  	 zakres_dolny = BH1750_data;
-  	}
-  TIM3->CCR3=1000;
-  TIM3->CCR1=1000;
-  TIM3->CCR2=1000;
-  HAL_Delay(300);
-  if(BH1750_OK == BH1750_read(&BH1750_data))
+
+
+  if(AUX_OK==UstawGranice( &zakres_dolny, &zakres_gorny))
   {
-	  zakres_gorny = BH1750_data-200;
-	  if(zakres_gorny<zakres_dolny)
-	  {
-		  zakres_gorny=BH1750_data;
-	  }
+	  size = sprintf(buffer, "min %d, max %d \n\r", (int)zakres_dolny, (int)zakres_gorny);
+	 		  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+	 		  HAL_Delay(100);
   }
+
+  HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
  
+ 
 
-  size = sprintf(buffer, "Podaj wartosc referencyjna w granicach od: %d do %d lux. \n\r", (int)zakres_dolny, (int)zakres_gorny);
-  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
-  HAL_Delay(100);
-  size = sprintf(buffer, "Wartosc podac w formacie \"00xxx\" (w luksach), np. 00500 lub 54000.\n\r", (int)zakres_dolny, (int)zakres_gorny);
-  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
@@ -177,31 +173,30 @@ int main(void)
 	  if(BH1750_OK == BH1750_read(&BH1750_data) && WAR_ZADANA>0)
 	  {
 			BH1750_data_int = BH1750_data;
-			size = sprintf(buffer, "BH1750 Lux: %d, Duty: %d, wartosc zadana: %d lux \n\r", BH1750_data_int, Duty,WAR_ZADANA);
-			HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+		 if(zgoda_tx)
+		  {
+			 zgoda_tx=0;
+				size = sprintf(buffer, "BH1750 Lux: %d, Duty: %d, wartosc zadana: %d lux \n\r", BH1750_data_int, Duty,WAR_ZADANA);
+				HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+
+		  }
+
 	  }
 
 
 
-	HAL_Delay(120);
-	PID_ERROR =  WAR_ZADANA- BH1750_data;
-	Duty = arm_pid_f32(&PID, PID_ERROR);
-
-	if(Duty<0)
-		Duty=0;
-	if(Duty>1000)
-		Duty=1000;
-
-
-
-	TIM3->CCR3=Duty;
-	TIM3->CCR1=Duty;
-	TIM3->CCR2=Duty;
-
-
-	HAL_UART_Receive_IT(&huart3,(uint8_t*)buffer2,5);
-
-
+	HAL_UART_Receive_IT(&huart3,(uint8_t*)buffer2,BUFFER2_SIZE);
+	if(buffer2[0]!='\0')
+	{
+		for(int i=0;i<BUFFER2_SIZE;i++)
+		{
+			if(buffer2[i]=='\n'){
+				rozmiar = sscanf(buffer2,"%d",&WAR_ZADANA);
+				memset(buffer2,'\0',sizeof(buffer2));
+				huart3.pRxBuffPtr  = (uint8_t*)buffer2;
+			}
+		}
+	}
 	//
     /* USER CODE END WHILE */
 
@@ -270,12 +265,27 @@ void SystemClock_Config(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 	if(huart->Instance == USART3)
 	{
-		if(buffer2[0]!='\0')
-		{
-			rozmiar = sscanf(buffer2,"%d",&WAR_ZADANA);
-			memset(buffer2,'\0',sizeof(buffer2));
-		}
 	}
+}
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
+	if(htim->Instance==TIM4){
+	if(zgoda_tx==0)
+		zgoda_tx=1;
+
+	}
+	if(htim->Instance==TIM2){
+		PID_ERROR =  WAR_ZADANA- BH1750_data;
+			Duty = arm_pid_f32(&PID, PID_ERROR);
+
+			if(Duty<0)
+				Duty=0;
+			if(Duty>1000)
+				Duty=1000;
+
+
+			UstawPulse(Duty);
+
+		}
 }
 /* USER CODE END 4 */
 
