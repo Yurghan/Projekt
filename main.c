@@ -43,7 +43,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -55,26 +54,10 @@
 
 /* USER CODE BEGIN PV */
 
-int Duty=0;
-char str1[6];
-char strR[3];
-char strG[3];
-char strB[3];
-char dupa[4];
-long int R,G,B;
-
-float BH1750_data;
-float PID_ERROR=0;
-int WAR_ZADANA = 1000;
-int BH1750_data_int;
-char buffer[40];
-char buffer2[20];
-char tempbuffer;
-int counter;
-
-uint8_t size;
-uint8_t rozmiar;
-
+float BH1750_data, PID_ERROR, zakres_dolny, zakres_gorny;
+int WAR_ZADANA, BH1750_data_int, Duty;
+char buffer[80], buffer2[5];
+uint8_t rozmiar, size;
 
 /* USER CODE END PV */
 
@@ -127,41 +110,80 @@ int main(void)
   /* USER CODE BEGIN 2 */
   BH1750_init(&hi2c1);
 
+
   arm_pid_instance_f32 PID;
 
-  PID.Kp =0;        /* Proportional */
-  PID.Ki =0.025;        /* Integral */
-  PID.Kd =0;        /* Derivative */
+  PID.Kp =0;
+  PID.Ki =0.025;
+  PID.Kd =0;
 
 
 
   arm_pid_init_f32(&PID, 0);
 
-  if(BH1750_OK == BH1750_set_mode(CONTINUOUS_HIGH_RES_MODE)){
+  if(BH1750_OK == BH1750_set_mode(CONTINUOUS_HIGH_RES_MODE_2))
+  {
 	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   }
-
-
-
+  TIM3->CCR3=0;
+  TIM3->CCR1=0;
+  TIM3->CCR2=0;
+  HAL_Delay(300);
+  if(BH1750_OK == BH1750_read(&BH1750_data))
+  	{
+  	 zakres_dolny = BH1750_data;
+  	}
+  TIM3->CCR3=1000;
+  TIM3->CCR1=1000;
+  TIM3->CCR2=1000;
+  HAL_Delay(300);
+  if(BH1750_OK == BH1750_read(&BH1750_data))
+  {
+	  zakres_gorny = BH1750_data-200;
+	  if(zakres_gorny<zakres_dolny)
+	  {
+		  zakres_gorny=BH1750_data;
+	  }
+  }
   /* USER CODE END 2 */
  
- 
 
+  size = sprintf(buffer, "Podaj wartosc referencyjna w granicach od: %d do %d lux. \n\r", (int)zakres_dolny, (int)zakres_gorny);
+  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+  HAL_Delay(100);
+  size = sprintf(buffer, "Wartosc podac w formacie \"00xxx\" (w luksach), np. 00500 lub 54000.\n\r", (int)zakres_dolny, (int)zakres_gorny);
+  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  if(WAR_ZADANA>zakres_gorny)
+	  {
+		  WAR_ZADANA=-1;
+		  size = sprintf(buffer, "Podano wartosc powyzej zakresu. Wprowadz mniejsza wartosc. \n\r", (int)zakres_dolny, (int)zakres_gorny);
+		  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+		  HAL_Delay(100);
+	  }
 
-	if(BH1750_OK == BH1750_read(&BH1750_data))
-		{
-		BH1750_data_int = BH1750_data;
-		size = sprintf(buffer, "BH1750 Lux: %d, Duty: %d \n\r", BH1750_data_int, Duty);
-		HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
-	}
+	  if(WAR_ZADANA<zakres_dolny && WAR_ZADANA>0)
+	  {
+		  WAR_ZADANA=-1;
+		  size = sprintf(buffer, "Podano wartosc ponizej zakresu. Wprowadz wieksza wartosc. \n\r", (int)zakres_dolny, (int)zakres_gorny);
+		  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+		  HAL_Delay(100);
+	  }
+	  if(BH1750_OK == BH1750_read(&BH1750_data) && WAR_ZADANA>0)
+	  {
+			BH1750_data_int = BH1750_data;
+			size = sprintf(buffer, "BH1750 Lux: %d, Duty: %d, wartosc zadana: %d lux \n\r", BH1750_data_int, Duty,WAR_ZADANA);
+			HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+	  }
 
-	HAL_Delay(200);
+
+
+	HAL_Delay(120);
 	PID_ERROR =  WAR_ZADANA- BH1750_data;
 	Duty = arm_pid_f32(&PID, PID_ERROR);
 
@@ -177,7 +199,8 @@ int main(void)
 	TIM3->CCR2=Duty;
 
 
-	HAL_UART_Receive_DMA(&huart3,&buffer2,1);
+	HAL_UART_Receive_IT(&huart3,(uint8_t*)buffer2,5);
+
 
 	//
     /* USER CODE END WHILE */
@@ -245,44 +268,14 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
-	if(huart->Instance == USART3){
-
-
-/*
-	memcpy( strR, &str1[0], 2 );
-		strR[2]='\0';
-		R=strtol(strR, 0, 16);
-
-		memcpy( strG, &str1[2], 2 );
-		strG[2]='\0';
-		G=strtol(strG, 0, 16);
-
-		memcpy( strB, &str1[4], 2 );
-		strB[2]='\0';
-		B=strtol(strB, 0, 16);
-
-
-		R=1000*R/256;
-		G=1000*G/256;
-		B=1000*B/256;
-
-		TIM3->CCR3=R;
-		TIM3->CCR1=G;
-		TIM3->CCR2=B;
-		 */
-	}
-
-			//rozmiar = sscanf(buffer2,"%d",&WAR_ZADANA);
-			//memset(buffer2,'\0',sizeof(buffer2));
-
-
-	if(BH1750_OK == BH1750_read(&BH1750_data))
+	if(huart->Instance == USART3)
 	{
-	 		  BH1750_data_int = BH1750_data;
-	 	  	  size = sprintf(buffer, "BH1750 Lux: %d\n\r", BH1750_data_int);
-	 	  	  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
-	 }
-
+		if(buffer2[0]!='\0')
+		{
+			rozmiar = sscanf(buffer2,"%d",&WAR_ZADANA);
+			memset(buffer2,'\0',sizeof(buffer2));
+		}
+	}
 }
 /* USER CODE END 4 */
 
