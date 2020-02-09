@@ -1,8 +1,8 @@
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
+  * @file           main.c
+  * @brief          Main program body
   ******************************************************************************
   * @attention
   *
@@ -16,6 +16,13 @@
   *
   ******************************************************************************
   */
+
+/*! \mainpage Projekt zaliczeniowy - systemy mikroprocesorowe
+ *
+ * \section intro_sec Wstęp
+ * To jest dokumentacja do projektu zaliczeniowego
+ */
+
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -43,6 +50,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define BUFFER1_SIZE 40
 #define BUFFER2_SIZE 40
 /* USER CODE END PD */
 
@@ -55,11 +63,33 @@
 
 /* USER CODE BEGIN PV */
 
-float BH1750_data, PID_ERROR, zakres_dolny, zakres_gorny;
-int WAR_ZADANA, BH1750_data_int, Duty;
-char buffer[80], buffer2[BUFFER2_SIZE], zgoda_tx;
-uint8_t rozmiar, size;
+/// zmienna przechowująca odczytaną wartość natężenia światła
+float BH1750_data;
+float PID_ERROR;
+float zakres_dolny;
+float zakres_gorny;
+
+/// zmienna do przechowywania zadanej wartości
+int WAR_ZADANA;
+int BH1750_data_int;
+int Duty;
+int war_zadana_temp;
+/// Decyduje o wyborze ustawianej cyfry w trybie ręcznym
+int decyzja = 1;
+int cyfra = 0;
+
+/// Tablica do przechowywania wysyłanych komunikatów
+char buffer[BUFFER1_SIZE];
+/// Tablica do przechowywania odbieranych komunikatów
+char buffer2[BUFFER2_SIZE];
+char zgoda_tx;
+
+uint8_t size;
+
 arm_pid_instance_f32 PID;
+
+
+
 
 /* USER CODE END PV */
 
@@ -111,6 +141,7 @@ int main(void)
   MX_TIM4_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+  /* Inicjalizacja timera 4, ustawienie wartości prescalera oraz rejestru Auto Reload */
   HAL_TIM_Base_Start_IT(&htim4);
 
   TIM4->ARR=4999;
@@ -119,18 +150,16 @@ int main(void)
   TIM2->ARR=999;
   TIM2->PSC=7199;
 
+  /* Inicjalizacja czujnika*/
   BH1750_init(&hi2c1);
 
-
-
+  /* Ustawienie wartości członów PID oraz inicjalizja instancji PID*/
   PID.Kp =0;
   PID.Ki =0.025;
   PID.Kd =0;
-
-
-
   arm_pid_init_f32(&PID, 0);
 
+  /* Uruchomienie PWM*/
   if(BH1750_OK == BH1750_set_mode(CONTINUOUS_HIGH_RES_MODE_2))
   {
 	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
@@ -138,14 +167,15 @@ int main(void)
 	  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   }
 
-
-  if(AUX_OK==UstawGranice( &zakres_dolny, &zakres_gorny))
+  /* Ustawienie zakresu pomiaru oraz wyświetlenie informacji do użytkownika*/
+  if(AUX_OK==AUX_UstawGranice( &zakres_dolny, &zakres_gorny))
   {
 	  size = sprintf(buffer, "min %d, max %d \n\r", (int)zakres_dolny, (int)zakres_gorny);
 	 		  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
 	 		  HAL_Delay(100);
   }
 
+  /* Uruchomienie timera 2*/
   HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
  
@@ -155,48 +185,54 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if(WAR_ZADANA>zakres_gorny)
-	  {
-		  WAR_ZADANA=-1;
-		  size = sprintf(buffer, "Podano wartosc powyzej zakresu. Wprowadz mniejsza wartosc. \n\r", (int)zakres_dolny, (int)zakres_gorny);
-		  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
-		  HAL_Delay(100);
-	  }
+	  /* Sprawdzenie czy wartość referencyjna podana przez użytkownika znajduje się w zakresie pomiarowym, jeśli nie,
+	     wystawiany jest komunikat z prośbą o ponowne wpisanie wartości*/
+	if(WAR_ZADANA>zakres_gorny)
+	{
+		size = sprintf(buffer, "Podano wartosc %d. Wprowadz wartosc miedzy %d, a %d \n\r",
+			WAR_ZADANA, (int)zakres_dolny, (int)zakres_gorny);
+		HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+		WAR_ZADANA=-1;
+	}
 
-	  if(WAR_ZADANA<zakres_dolny && WAR_ZADANA>0)
-	  {
-		  WAR_ZADANA=-1;
-		  size = sprintf(buffer, "Podano wartosc ponizej zakresu. Wprowadz wieksza wartosc. \n\r", (int)zakres_dolny, (int)zakres_gorny);
-		  HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
-		  HAL_Delay(100);
-	  }
-	  if(BH1750_OK == BH1750_read(&BH1750_data) && WAR_ZADANA>0)
-	  {
-			BH1750_data_int = BH1750_data;
-		 if(zgoda_tx)
-		  {
-			 zgoda_tx=0;
-				size = sprintf(buffer, "BH1750 Lux: %d, Duty: %d, wartosc zadana: %d lux \n\r", BH1750_data_int, Duty,WAR_ZADANA);
-				HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+	if(WAR_ZADANA<zakres_dolny && WAR_ZADANA>0)
+	{
+		size = sprintf(buffer, "Podano wartosc %d. Wprowadz wartosc miedzy %d, a %d \n\r",
+			WAR_ZADANA, (int)zakres_dolny, (int)zakres_gorny);
+		HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+		WAR_ZADANA=-1;
+	}
+	/* Po zadaniu wartości referncyjnej z zakresu pomiarowego, następuje wyświetlenie komunikatu o aktualnie odczytywanej wartości natężenia,
+	   wypełnieniu PWM w % oraz aktualnie zadanej wartości*/
+	if(BH1750_OK == BH1750_read(&BH1750_data) && WAR_ZADANA>0)
+	{
+		if(zgoda_tx)
+		{
+			zgoda_tx=0;
+			size = sprintf(buffer, "BH1750 Lux: %d, Duty: %d, wartosc zadana: %d lux \n\r",
+			(int)BH1750_data, Duty/10,WAR_ZADANA);
+			HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
+		}
+	}
 
-		  }
 
-	  }
-
-
-
+	/* Odczytywanie wartości referencyjnej. Wysyłana ramka musi zakończyć się terminatorem w postaci EOF '\n'*/
 	HAL_UART_Receive_IT(&huart3,(uint8_t*)buffer2,BUFFER2_SIZE);
 	if(buffer2[0]!='\0')
 	{
 		for(int i=0;i<BUFFER2_SIZE;i++)
 		{
-			if(buffer2[i]=='\n'){
-				rozmiar = sscanf(buffer2,"%d",&WAR_ZADANA);
+			if(buffer2[i]=='\n')
+			{
+				sscanf(buffer2,"%d",&WAR_ZADANA);
 				memset(buffer2,'\0',sizeof(buffer2));
 				huart3.pRxBuffPtr  = (uint8_t*)buffer2;
 			}
 		}
 	}
+
+	/* Krótki delay w celu wyeliminowania zwielokrotnienia odczytywanych sygnałów wejść zewnętrznych*/
+	HAL_Delay(40);
 	//
     /* USER CODE END WHILE */
 
@@ -262,30 +298,89 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
-	if(huart->Instance == USART3)
+
+/**
+  * @brief  Odwołania upłyniętego okresu w trybie nie blokującym
+  *
+  *	@detail Instancja TIM4 odpowiada za udzielanie zgody na wysyłanie komunikatów maksymalnie 2 razy na sekundę. Instancja TIM2 odpowiada za ustawianie wypełnienia PWM.
+  * @param  htim oprawa TIM
+  * @retval None
+  *
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
+	if(htim->Instance==TIM4)
 	{
+		if(zgoda_tx == 0)
+		{
+			zgoda_tx = 1;
+		}
+	}
+	if(htim->Instance==TIM2)
+	{
+		PID_ERROR = WAR_ZADANA - BH1750_data;
+		Duty = arm_pid_f32(&PID, PID_ERROR);
+		if(Duty<0)
+		{
+			Duty = 0;
+		}
+		if(Duty > 1000)
+		{
+			Duty = 1000;
+		}
+		AUX_UstawPulse(Duty);
 	}
 }
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
-	if(htim->Instance==TIM4){
-	if(zgoda_tx==0)
-		zgoda_tx=1;
 
-	}
-	if(htim->Instance==TIM2){
-		PID_ERROR =  WAR_ZADANA- BH1750_data;
-			Duty = arm_pid_f32(&PID, PID_ERROR);
+/**
+  * @brief  Wykrywanie odwołań lini EXTI
+  *
+  * Jeden przycisk zmienia miejsce ustawianej cyfry na kolejno: jedności, dziesiątek, setek,
+  * tysięcy i dziesiątek tysięcy. Dwa przyciski do zmiany wartości ustawianej cyfry.
+  * Po wciśnięciu przycisku zmiany miejsca pięć razy następuje zmiana wartości referncyjnej.
+  * @param  GPIO_Pin Określa piny podłączone do lini EXTI
+  *
+  *
+  * @retval None
+  *
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
-			if(Duty<0)
-				Duty=0;
-			if(Duty>1000)
-				Duty=1000;
-
-
-			UstawPulse(Duty);
-
+	if(GPIO_Pin == GPIO_PIN_0)
+	{
+		HAL_GPIO_TogglePin(LD3_GPIO_Port,LD3_Pin);
+		war_zadana_temp += AUX_Potega(10, decyzja-1) * cyfra;
+		if (decyzja<5)
+		{
+			decyzja++;
+			cyfra=0;
 		}
+		else
+		{
+			decyzja=1;
+			WAR_ZADANA = war_zadana_temp;
+			HAL_GPIO_TogglePin(LD2_GPIO_Port,LD2_Pin);
+			war_zadana_temp=0;
+			cyfra=0;
+		}
+	}
+
+	if(GPIO_Pin == GPIO_PIN_3)
+	{
+		HAL_GPIO_TogglePin(LD3_GPIO_Port,LD3_Pin);
+		if(cyfra>0)
+			cyfra--;
+		else
+			cyfra=9;
+	}
+
+	if(GPIO_Pin == GPIO_PIN_4)
+	{
+		HAL_GPIO_TogglePin(LD3_GPIO_Port,LD3_Pin);
+			if(cyfra<9)
+				cyfra++;
+			else
+				cyfra=0;
+	}
 }
 /* USER CODE END 4 */
 

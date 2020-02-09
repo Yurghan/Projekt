@@ -1,3 +1,9 @@
+/**
+  * @file           BH1750.c
+  * @brief          Obsługa czujnika BH1750
+  * @author			Nieznany
+  */
+
 #include "main.h"
 #include "i2c.h"
 
