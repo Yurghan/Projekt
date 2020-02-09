@@ -9,8 +9,6 @@
 #include "main.h"
 #include "stdarg.h"
 
-char buffer3[80];
-
 void AUX_UstawPulse(int pulse){
 	  TIM3->CCR1=pulse;
 	  TIM3->CCR2=pulse;
@@ -62,4 +60,4 @@ int AUX_Potega(int baza, unsigned int wykladnik)
 	}
 	return result;
 }
-/*
+

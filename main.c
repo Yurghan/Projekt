@@ -50,7 +50,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define BUFFER1_SIZE 40
+#define BUFFER1_SIZE 80
 #define BUFFER2_SIZE 40
 /* USER CODE END PD */
 
@@ -189,16 +189,14 @@ int main(void)
 	     wystawiany jest komunikat z prośbą o ponowne wpisanie wartości*/
 	if(WAR_ZADANA>zakres_gorny)
 	{
-		size = sprintf(buffer, "Podano wartosc %d. Wprowadz wartosc miedzy %d, a %d \n\r",
-			WAR_ZADANA, (int)zakres_dolny, (int)zakres_gorny);
+		size = sprintf(buffer, "Podano wartosc %d. Wprowadz wartosc miedzy %d, a %d \n\r", WAR_ZADANA, (int)zakres_dolny, (int)zakres_gorny);
 		HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
 		WAR_ZADANA=-1;
 	}
 
 	if(WAR_ZADANA<zakres_dolny && WAR_ZADANA>0)
 	{
-		size = sprintf(buffer, "Podano wartosc %d. Wprowadz wartosc miedzy %d, a %d \n\r",
-			WAR_ZADANA, (int)zakres_dolny, (int)zakres_gorny);
+		size = sprintf(buffer, "Podano wartosc %d. Wprowadz wartosc miedzy %d, a %d \n\r", WAR_ZADANA, (int)zakres_dolny, (int)zakres_gorny);
 		HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
 		WAR_ZADANA=-1;
 	}
@@ -209,8 +207,7 @@ int main(void)
 		if(zgoda_tx)
 		{
 			zgoda_tx=0;
-			size = sprintf(buffer, "BH1750 Lux: %d, Duty: %d, wartosc zadana: %d lux \n\r",
-			(int)BH1750_data, Duty/10,WAR_ZADANA);
+			size = sprintf(buffer, "BH1750 Lux: %d, Duty: %d, wartosc zadana: %d lux \n\r", (int)BH1750_data, Duty/10,WAR_ZADANA);
 			HAL_UART_Transmit_IT(&huart3, (uint8_t*)buffer, size);
 		}
 	}
